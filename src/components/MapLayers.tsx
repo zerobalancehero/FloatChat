@@ -2,7 +2,7 @@ import { PathLayer, ScatterplotLayer, PolygonLayer } from '@deck.gl/layers';
 import { TileLayer, TripsLayer } from '@deck.gl/geo-layers';
 import { BitmapLayer } from '@deck.gl/layers';
 
-export function renderMapLayers({ currentTime, depthFilter, mode, drawPoints, activeRegion, localDiscoveryData, globalTrajectories, globalDivePaths, globalAnomalies, globalBounds }: any) {
+export function renderMapLayers({ currentTime, depthFilter, mode, drawPoints, activeRegion, localDiscoveryData, globalTrajectories, globalDivePaths, globalAnomalies, globalBounds, globalCurrents }: any) {
   
   // ESRI World Imagery (No API Key Required!) mapped with a slight navy scientific tint
   const tileLayer = new TileLayer({
@@ -57,18 +57,33 @@ export function renderMapLayers({ currentTime, depthFilter, mode, drawPoints, ac
     widthMinPixels: 2,
     rounded: true,
     fadeTrail: true,
-    trailLength: 300,
+    trailLength: 60 * 24 * 60 * 60 * 1000, // 60 days in milliseconds
     currentTime: currentTime,
   });
 
-  const diveLayer = new PathLayer({
-    id: 'dive-layer',
-    data: activeRegion?.divePaths || [],
-    getPath: (d: any) => d.path.filter((p: any) => p[2] >= depthFilter * 20),
-    getColor: (d: any) => d.color,
-    widthMinPixels: 2,
+  const filteredDepthPoints: any[] = [];
+  if (activeRegion?.divePaths && depthFilter < -10) {
+      activeRegion.divePaths.forEach((dive: any) => {
+         let closest = null;
+         let minDiff = 50; 
+         dive.path.forEach((p: any) => {
+             const diff = Math.abs(p[2] - depthFilter);
+             if (diff < minDiff) { minDiff = diff; closest = p; }
+         });
+         if (closest) filteredDepthPoints.push(closest);
+      });
+  }
+
+  const diveLayer = new ScatterplotLayer({
+    id: 'depth-cloud-layer',
+    data: filteredDepthPoints,
+    getPosition: (d: any) => d,
+    getFillColor: [6, 182, 212, 160],
+    getRadius: 3000,
+    radiusMinPixels: 2,
+    radiusMaxPixels: 6,
     updateTriggers: {
-      getPath: depthFilter
+       data: [depthFilter, activeRegion]
     }
   });
 
@@ -114,5 +129,14 @@ export function renderMapLayers({ currentTime, depthFilter, mode, drawPoints, ac
     widthMinPixels: 3,
   });
 
-  return [tileLayer, regionBoundsLayer, tripsLayer, diveLayer, anomalyLayer, radarLayer, radarCoreLayer, lassoLayer];
+  const currentsLayer = new PathLayer({
+    id: 'ocean-currents-layer',
+    data: globalCurrents,
+    getPath: (d: any) => d.path,
+    getColor: (d: any) => d.velocity > 1 ? [16, 185, 129, 200] : [122, 222, 128, 90], 
+    widthMinPixels: 1,
+    opacity: 0.4,
+  });
+
+  return [tileLayer, regionBoundsLayer, currentsLayer, tripsLayer, diveLayer, anomalyLayer, radarLayer, radarCoreLayer, lassoLayer];
 }

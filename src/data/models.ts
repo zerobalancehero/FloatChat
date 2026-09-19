@@ -24,4 +24,6 @@ export type RegionTheme = {
    mhwData: any[];
    thermoclinePoint: number;
    bounds: [[number, number], [number, number]];
+   currentVectors: any[];
+   profiles: Record<string, ArgoObservation[]>;
 };

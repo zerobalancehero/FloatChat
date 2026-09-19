@@ -41,10 +41,16 @@ export function TopNav({ mode, setMode, activeRegionId, setActiveRegionId, execu
           </button>
           <div className="glass-panel" style={{ display: 'flex', alignItems: 'center', padding: '4px 12px', background: 'rgba(255,255,255,0.05)' }}>
             <select 
-              value={activeRegionId} 
-              onChange={e => setActiveRegionId(e.target.value)}
+              value={(mode === 'DARWIN' || mode === 'DRAW') ? 'custom' : activeRegionId} 
+              onChange={e => {
+                  if (e.target.value !== 'custom') {
+                      setActiveRegionId(e.target.value);
+                      setMode('EXECUTIVE');
+                  }
+              }}
               style={{ background: 'transparent', color: 'white', border: 'none', outline: 'none', fontSize: '12px', cursor: 'pointer' }}
             >
+              <option value="custom" style={{color: 'black'}} disabled hidden>Custom Selection</option>
               <option value="kuroshio" style={{color: 'black'}}>Kuroshio Extension</option>
               <option value="gulf_stream" style={{color: 'black'}}>Gulf Stream</option>
               <option value="agulhas" style={{color: 'black'}}>Agulhas Current</option>
@@ -65,8 +71,49 @@ export function TopNav({ mode, setMode, activeRegionId, setActiveRegionId, execu
   );
 }
 
-export function LeftDock({ mode, activeRegion, localDiscoveryData, darwinResult, isDarwinProcessing }: any) {
+export function LeftDock({ mode, setMode, setDrawPoints, activeRegion, localDiscoveryData, darwinResult, isDarwinProcessing }: any) {
   const [sqlOpen, setSqlOpen] = useState(false);
+
+  // Compute live valid stats for Executive View
+  const hasTs = activeRegion?.tsData && activeRegion.tsData.length > 0;
+  const ts = activeRegion?.tsData;
+  const tempArr = hasTs ? ts.map((d: any) => d.temp).filter((v: number) => !isNaN(v)) : [];
+  const salArr = hasTs ? ts.map((d: any) => d.salinity).filter((v: number) => !isNaN(v)) : [];
+  const depthArr = hasTs ? ts.map((d: any) => d.depth).filter((v: number) => !isNaN(v)) : [];
+
+  const tempMin = hasTs && tempArr.length > 0 ? Math.min(...tempArr).toFixed(2) : '-';
+  const tempMax = hasTs && tempArr.length > 0 ? Math.max(...tempArr).toFixed(2) : '-';
+  const tempMean = hasTs && tempArr.length > 0 ? (tempArr.reduce((a:number,b:number)=>a+b, 0) / tempArr.length).toFixed(2) : '-';
+
+  const salMin = hasTs && salArr.length > 0 ? Math.min(...salArr).toFixed(2) : '-';
+  const salMax = hasTs && salArr.length > 0 ? Math.max(...salArr).toFixed(2) : '-';
+  const salMean = hasTs && salArr.length > 0 ? (salArr.reduce((a:number,b:number)=>a+b, 0) / salArr.length).toFixed(2) : '-';
+  
+  const depthMin = hasTs && depthArr.length > 0 ? Math.min(...depthArr).toFixed(0) : '-';
+  const depthMax = hasTs && depthArr.length > 0 ? Math.max(...depthArr).toFixed(0) : '-';
+
+  const earliestTime = activeRegion?.trajectories?.length > 0 
+      ? Math.min(...activeRegion.trajectories.map((t:any) => t.path?.[0]?.[3] || Infinity)) 
+      : null;
+  const latestTime = activeRegion?.trajectories?.length > 0
+      ? Math.max(...activeRegion.trajectories.map((t:any) => t.path?.[t.path.length-1]?.[3] || -Infinity))
+      : null;
+
+  const timeStr = earliestTime && earliestTime !== Infinity 
+      ? `${new Date(earliestTime).toISOString().slice(0,10)} to ${new Date(latestTime).toISOString().slice(0,10)}`
+      : 'Unavailable';
+
+  // Draw Time calculations
+  const drawnEarliest = (mode === 'DARWIN' && localDiscoveryData?.trajectories?.length > 0)
+      ? Math.min(...localDiscoveryData.trajectories.map((t:any) => t.path?.[0]?.[3] || Infinity))
+      : null;
+  const drawnLatest = (mode === 'DARWIN' && localDiscoveryData?.trajectories?.length > 0)
+      ? Math.max(...localDiscoveryData.trajectories.map((t:any) => t.path?.[t.path.length-1]?.[3] || -Infinity))
+      : null;
+
+  const drawnTimeStr = (drawnEarliest && drawnEarliest !== Infinity)
+      ? `${new Date(drawnEarliest).toISOString().slice(0,10)} to ${new Date(drawnLatest).toISOString().slice(0,10)}`
+      : 'Unavailable';
 
   return (
     <div className="glass-panel" style={{ position: 'absolute', left: '72px', top: '90px', width: '340px', display: 'flex', flexDirection: 'column', padding: '16px', gap: '16px', pointerEvents: 'auto', zIndex: 10 }}>
@@ -78,22 +125,36 @@ export function LeftDock({ mode, activeRegion, localDiscoveryData, darwinResult,
       </div>
 
       {mode === 'EXECUTIVE' && (
-         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-            <div style={{ padding: '12px', borderRadius: '4px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.05)' }}>
-               <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase' }}>Profiles</div>
-               <div style={{ fontSize: '20px', fontWeight: 300, color: '#06b6d4' }}>1,254</div>
-            </div>
-            <div style={{ padding: '12px', borderRadius: '4px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.05)' }}>
-               <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase' }}>Anomaly</div>
-               <div style={{ fontSize: '20px', fontWeight: 300, color: '#f59e0b' }}>+2.4°C</div>
-            </div>
-            <div style={{ padding: '12px', borderRadius: '4px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.05)' }}>
-               <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase' }}>MLD</div>
-               <div style={{ fontSize: '20px', fontWeight: 300 }}>38.5m</div>
-            </div>
-            <div style={{ padding: '12px', borderRadius: '4px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.05)' }}>
-               <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase' }}>Confidence</div>
-               <div style={{ fontSize: '20px', fontWeight: 300, color: '#4ade80' }}>94.2%</div>
+         <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '8px' }}>
+            <div style={{ padding: '12px', borderRadius: '4px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.05)', fontSize: '11px', color: 'rgba(255,255,255,0.8)' }}>
+               {hasTs ? (
+                 <>
+                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginBottom: '8px' }}>
+                     <div><strong style={{color: '#d946ef'}}>Profiles Analyzed:</strong> <br/>{activeRegion?.trajectories?.length || 0}</div>
+                     <div><strong style={{color: '#d946ef'}}>Valid Observations:</strong> <br/>{ts.length}</div>
+                   </div>
+                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginBottom: '8px' }}>
+                     <div><strong style={{color: '#06b6d4'}}>Temperature Mean:</strong> <br/>{tempMean}°C</div>
+                     <div><strong style={{color: '#06b6d4'}}>Temp Range:</strong> <br/>{tempMin}°C to {tempMax}°C</div>
+                   </div>
+                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginBottom: '8px' }}>
+                     <div><strong style={{color: '#f59e0b'}}>Salinity Mean:</strong> <br/>{salMean} psu</div>
+                     <div><strong style={{color: '#f59e0b'}}>Salinity Range:</strong> <br/>{salMin} to {salMax} psu</div>
+                   </div>
+                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginBottom: '8px' }}>
+                     <div><strong style={{color: '#4ade80'}}>Pressure/Depth:</strong> <br/>{depthMin}m to {depthMax}m</div>
+                     <div><strong style={{color: '#4ade80'}}>Time Range:</strong> <br/>{timeStr}</div>
+                   </div>
+                   <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '4px', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '8px' }}>
+                     <div><strong style={{color: 'white'}}>Currents (Open-Meteo):</strong> Polled</div>
+                     <div><strong style={{color: 'white'}}>Last Refresh:</strong> {new Date().toISOString().slice(0, 19).replace('T', ' ')} UTC</div>
+                   </div>
+                 </>
+               ) : (
+                 <div style={{ textAlign: 'center', padding: '20px 0', color: 'rgba(255,255,255,0.5)' }}>
+                    Unavailable — insufficient live data
+                 </div>
+               )}
             </div>
          </div>
       )}
@@ -108,35 +169,39 @@ export function LeftDock({ mode, activeRegion, localDiscoveryData, darwinResult,
       )}
       
       {mode === 'DARWIN' && localDiscoveryData && (
-         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-            <div style={{ padding: '12px', borderRadius: '4px', background: 'rgba(217,70,239,0.1)', border: '1px solid rgba(217,70,239,0.3)' }}>
-               <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase' }}>Local Observations</div>
-               <div style={{ fontSize: '20px', fontWeight: 300, color: '#d946ef' }}>{localDiscoveryData.observationCount}</div>
+         <div style={{ padding: '8px' }}>
+            <div style={{ color: '#d946ef', fontSize: '13px', fontWeight: 'bold', marginBottom: '12px' }}>DRAWN REGION DATA</div>
+            <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)', display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '8px', marginBottom: '12px' }}>
+               <div style={{ color: 'white' }}>Selection:</div>
+               <div style={{ fontWeight: 'bold' }}>Drawn Region</div>
+               <div style={{ color: 'white' }}>Lat Bounds:</div>
+               <div style={{ fontWeight: 'bold' }}>{localDiscoveryData.bounds?.[0][1]?.toFixed(1)}° to {localDiscoveryData.bounds?.[1][1]?.toFixed(1)}°</div>
+               <div style={{ color: 'white' }}>Lon Bounds:</div>
+               <div style={{ fontWeight: 'bold' }}>{localDiscoveryData.bounds?.[0][0]?.toFixed(1)}° to {localDiscoveryData.bounds?.[1][0]?.toFixed(1)}°</div>
+               <div style={{ color: 'white' }}>Profiles:</div>
+               <div style={{ fontWeight: 'bold' }}>{localDiscoveryData.count}</div>
+               <div style={{ color: 'white' }}>Observations:</div>
+               <div style={{ fontWeight: 'bold' }}>{localDiscoveryData.observationCount}</div>
+               <div style={{ color: 'white' }}>Date Range:</div>
+               <div style={{ fontWeight: 'bold' }}>{drawnTimeStr}</div>
             </div>
-            <div style={{ padding: '12px', borderRadius: '4px', background: 'rgba(217,70,239,0.1)', border: '1px solid rgba(217,70,239,0.3)' }}>
-               <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase' }}>Gradient ΔS/ΔP</div>
-               <div style={{ fontSize: '20px', fontWeight: 300, color: '#f59e0b' }}>0.015</div>
+            {localDiscoveryData.observationCount === 0 && (
+                <div style={{ color: '#fca5a5', fontSize: '11px', marginBottom: '8px' }}>No Argovis observations found inside this selection.</div>
+            )}
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '8px', fontSize: '10px', color: 'rgba(255,255,255,0.5)', lineHeight: 1.4 }}>
+               Data source: Argovis<br/>
+               Last update: {new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC
             </div>
-            <div style={{ padding: '12px', borderRadius: '4px', background: 'rgba(217,70,239,0.1)', border: '1px solid rgba(217,70,239,0.3)' }}>
-               <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase' }}>Displacement</div>
-               <div style={{ fontSize: '20px', fontWeight: 300 }}>11.2σ</div>
-            </div>
-            <div style={{ padding: '12px', borderRadius: '4px', background: 'rgba(217,70,239,0.1)', border: '1px solid rgba(217,70,239,0.3)' }}>
-               <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase' }}>Persistence</div>
-               <div style={{ fontSize: '20px', fontWeight: 300, color: '#4ade80' }}>14 Days</div>
-            </div>
+            
+            <button 
+                onClick={() => {
+                    if (setMode) setMode('EXECUTIVE');
+                    if (setDrawPoints) setDrawPoints([]);
+                }} 
+                style={{ marginTop: '16px', width: '100%', padding: '6px 12px', background: 'rgba(239, 68, 68, 0.2)', border: '1px solid rgba(239, 68, 68, 0.5)', color: '#fca5a5', fontWeight: 'bold', borderRadius: '4px', cursor: 'pointer', fontSize: '11px' }}>
+                X CLEAR SELECTION
+            </button>
          </div>
-      )}
-
-      {/* Briefing */}
-      {mode !== 'DARWIN' && mode !== 'DARWIN_ANALYST' && (
-      <div style={{ fontSize: '13px', lineHeight: 1.6, color: 'rgba(255,255,255,0.85)' }}>
-         <ul style={{ paddingLeft: '16px', margin: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <li>Strong eddy rotation detected at thermocline depth.</li>
-            <li>Thermal inversions highly correlated with recent advection.</li>
-            <li>Potential density displacement occurring in the Kuroshio flow.</li>
-         </ul>
-      </div>
       )}
 
       {mode === 'DARWIN' && localDiscoveryData && localDiscoveryData.hasAnomaly && (
@@ -279,31 +344,71 @@ const TsTooltip = ({ data }: any) => {
     );
 };
 
-export function RightDock({ mode, activeRegion, localDiscoveryData }: any) {
+export function RightDock({ mode, activeRegion, localDiscoveryData, selectedProfileId, setSelectedProfileId }: any) {
   const [hoveredTSPoint, setHoveredTSPoint] = useState<any>(null);
   const [hoverPosition, setHoverPosition] = useState({x: 0, y: 0});
-  const { tsData, isopycnalsData, depthProfileData, mhwData, thermoclinePoint, name } = activeRegion;
-  const displayTsData = localDiscoveryData ? localDiscoveryData.tsData : tsData;
+  const { isopycnalsData, mhwData, thermoclinePoint } = activeRegion;
+  
+  const isDrawn = mode === 'DARWIN' && localDiscoveryData;
+  const isAggregate = !selectedProfileId && !isDrawn;
+  
+  const displayContext = selectedProfileId ? 'FLOAT PROFILE' : isDrawn ? 'DRAWN REGION' : 'VIEWPORT AGGREGATE';
+
+  const selectedProfileData = activeRegion?.profiles?.[selectedProfileId];
+
+  const displayTsData = selectedProfileId ? (selectedProfileData || []) : (localDiscoveryData ? localDiscoveryData.tsData : activeRegion.tsData || []);
+
+  const displayDepthData = selectedProfileId 
+    ? (selectedProfileData ? selectedProfileData.map((o: any) => ({ depth: -o.depth, temp: o.temp })) : [])
+    : (localDiscoveryData ? localDiscoveryData.tsData?.map((o:any)=>({depth: -o.depth, temp: o.temp})) : activeRegion.depthProfileData);
+  
+  const currentBoundsLat = isDrawn 
+       ? `${localDiscoveryData.bounds?.[0][1]?.toFixed(1)}°–${localDiscoveryData.bounds?.[1][1]?.toFixed(1)}°` 
+       : activeRegion?.bounds ? `${activeRegion.bounds[0][1].toFixed(1)}°–${activeRegion.bounds[1][1].toFixed(1)}°` : 'N/A';
+  const currentBoundsLon = isDrawn 
+       ? `${localDiscoveryData.bounds?.[0][0]?.toFixed(1)}°–${localDiscoveryData.bounds?.[1][0]?.toFixed(1)}°` 
+       : activeRegion?.bounds ? `${activeRegion.bounds[0][0].toFixed(1)}°–${activeRegion.bounds[1][0].toFixed(1)}°` : 'N/A';
+
   return (
     <div className="glass-panel" style={{ position: 'absolute', right: '24px', top: '90px', width: '360px', display: 'flex', flexDirection: 'column', padding: '16px', gap: '16px', pointerEvents: 'auto', zIndex: 10, height: 'calc(100vh - 160px)', overflowY: 'auto' }}>
       
       {/* T-S Diagram */}
       <div 
-        style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.05)', padding: '12px', height: '220px', position: 'relative', flexShrink: 0 }}
+        style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.05)', padding: '12px', height: '235px', position: 'relative', flexShrink: 0 }}
         onMouseMove={(e) => {
            const rect = e.currentTarget.getBoundingClientRect();
            setHoverPosition({ x: e.clientX - rect.left, y: e.clientY - rect.top });
         }}
         onMouseLeave={() => setHoveredTSPoint(null)}
       >
-        <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', fontWeight: 600, marginBottom: '8px', zIndex: 2 }}>T-S Diagram (Θ vs S_A)</div>
-        <div style={{ position: 'absolute', right: '12px', top: '12px', fontSize: '10px', color: 'rgba(255,255,255,0.3)' }}>σ0 contours</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px', zIndex: 2 }}>
+           <div>
+             <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', fontWeight: 600 }}>T-S Diagram (Θ vs S_A)</div>
+             <div style={{ fontSize: '11px', fontWeight: 'bold', color: isAggregate ? '#06b6d4' : isDrawn ? '#d946ef' : '#f59e0b', marginTop: '2px' }}>
+                {displayContext}
+             </div>
+             {selectedProfileId ? (
+                 <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.5)', marginTop: '2px' }}>
+                    ID: {selectedProfileId} | {selectedProfileData?.[0]?.cycle ? `Cycle ${selectedProfileData[0].cycle}` : ''} | Source: Argovis
+                 </div>
+             ) : (
+                 <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.5)', marginTop: '2px' }}>
+                    Lat: {currentBoundsLat} | Lon: {currentBoundsLon} <br/>
+                    {displayTsData?.length || 0} observations | Source: Argovis
+                 </div>
+             )}
+           </div>
+           { selectedProfileId && (
+               <button onClick={() => setSelectedProfileId(null)} style={{ background: 'rgba(239, 68, 68, 0.2)', border: '1px solid rgba(239, 68, 68, 0.5)', color: '#fca5a5', padding: '2px 6px', borderRadius: '4px', cursor: 'pointer', fontSize: '9px' }}>X Clear Selection</button>
+           )}
+        </div>
+        <div style={{ position: 'absolute', right: '12px', top: '35px', fontSize: '10px', color: 'rgba(255,255,255,0.3)' }}>σ0 contours</div>
         <div style={{ flex: 1, width: '100%', height: '100%' }}>
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart margin={{ top: 5, right: 5, bottom: -10, left: -25 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-              <XAxis type="number" dataKey="salinity" domain={[34, 36]} stroke="rgba(255,255,255,0.4)" tick={{fontSize: 9, fill: 'rgba(255,255,255,0.4)'}} tickLine={false} axisLine={false} />
-              <YAxis type="number" dataKey="temp" domain={[0, 24]} stroke="rgba(255,255,255,0.4)" tick={{fontSize: 9, fill: 'rgba(255,255,255,0.4)'}} tickLine={false} axisLine={false} />
+              <XAxis type="number" dataKey="salinity" domain={['auto', 'auto']} stroke="rgba(255,255,255,0.4)" tick={{fontSize: 9, fill: 'rgba(255,255,255,0.4)'}} tickLine={false} axisLine={false} />
+              <YAxis type="number" dataKey="temp" domain={['auto', 'auto']} stroke="rgba(255,255,255,0.4)" tick={{fontSize: 9, fill: 'rgba(255,255,255,0.4)'}} tickLine={false} axisLine={false} />
               
               {/* Density contours as curves */}
               <Line data={isopycnalsData} type="monotone" dataKey="iso24" stroke="rgba(255,255,255,0.1)" strokeDasharray="3 3" dot={false} isAnimationActive={false} />
@@ -314,8 +419,8 @@ export function RightDock({ mode, activeRegion, localDiscoveryData }: any) {
                 name="Water Mass" 
                 data={displayTsData} 
                 fill="#06b6d4" 
-                onMouseEnter={(data: any) => {
-                  setHoveredTSPoint(data.payload || data);
+                onMouseEnter={(payloadNode: any, index: number) => {
+                  setHoveredTSPoint({ ...displayTsData[index], ...payloadNode });
                 }}
                 onMouseLeave={() => setHoveredTSPoint(null)}
               />
@@ -332,37 +437,39 @@ export function RightDock({ mode, activeRegion, localDiscoveryData }: any) {
 
       {/* Thermocline Gradient Profile */}
       <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.05)', padding: '12px', height: '220px', flexShrink: 0 }}>
-        <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', fontWeight: 600, marginBottom: '8px' }}>Thermocline Profile (Depth vs Temp)</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+           <div>
+             <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', fontWeight: 600 }}>Thermocline Profile (Depth vs Temp)</div>
+             <div style={{ fontSize: '11px', fontWeight: 'bold', color: isAggregate ? '#06b6d4' : isDrawn ? '#d946ef' : '#f59e0b', marginTop: '2px' }}>
+                {displayContext}
+             </div>
+           </div>
+        </div>
+        {displayDepthData && displayDepthData.length > 5 ? (
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={depthProfileData} layout="vertical" margin={{ top: 5, right: 35, left: -10, bottom: 5 }}>
+          <LineChart data={displayDepthData} layout="vertical" margin={{ top: 5, right: 35, left: -10, bottom: 5 }}>
             <XAxis type="number" dataKey="temp" stroke="rgba(255,255,255,0.4)" tick={{fontSize: 9}} domain={['auto', 'auto']} hide />
             <YAxis type="number" dataKey="depth" stroke="rgba(255,255,255,0.4)" tick={{fontSize: 9}} domain={[-2000, 0]} />
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" horizontal={false} />
             <Tooltip contentStyle={{backgroundColor: '#040711', border: '1px solid #06b6d4', fontSize: '12px', color: 'white'}} />
-            <ReferenceArea y1={-150} y2={-130} fill="rgba(245, 158, 11, 0.2)" />
-            <ReferenceLine y={-thermoclinePoint} stroke="#f59e0b" strokeWidth={2} strokeDasharray="3 3" label={{ position: 'right', value: `${thermoclinePoint}m Peak`, fill: '#f59e0b', fontSize: 10, fontWeight: 'bold' }} />
-            <Line type="monotone" dataKey="temp" stroke="#06b6d4" strokeWidth={2} dot={(props: any) => {
-               if(props.payload.depth === -thermoclinePoint) {
-                  return <circle cx={props.cx} cy={props.cy} r={5} fill="#f59e0b" stroke="none" />;
+            {isAggregate && thermoclinePoint > 0 && <ReferenceLine y={-thermoclinePoint} stroke="#f59e0b" strokeWidth={2} strokeDasharray="3 3" label={{ position: 'right', value: `${thermoclinePoint}m Peak`, fill: '#f59e0b', fontSize: 10, fontWeight: 'bold' }} />}
+            <Line type="monotone" dataKey="temp" stroke={isAggregate ? "#06b6d4" : "#f59e0b"} strokeWidth={2} dot={(props: any) => {
+               if(isAggregate && props.payload.depth === -thermoclinePoint) {
+                  return <circle cx={props.cx} cy={props.cy} r={5} fill="#f59e0b" stroke="none" key={'c'+props.cx+props.cy}/>;
                }
-               return <circle cx={props.cx} cy={props.cy} r={2} fill="#06b6d4" stroke="none" />;
+               return <circle cx={props.cx} cy={props.cy} r={2} fill={isAggregate ? "#06b6d4" : "#f59e0b"} stroke="none" key={'c'+props.cx+props.cy} />;
             }} />
           </LineChart>
         </ResponsiveContainer>
+        ) : (
+             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.4)', fontSize: '11px', textAlign: 'center' }}>INSUFFICIENT LIVE PROFILE DATA</div>
+        )}
       </div>
 
       {/* MHW Alert Card */}
       <div style={{ background: 'rgba(127, 29, 29, 0.4)', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.5)', padding: '12px', position: 'relative', overflow: 'hidden', flexShrink: 0 }}>
-         <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#f87171', textTransform: 'uppercase' }}>Marine Heatwave Alert</div>
-         <div style={{ fontSize: '16px', fontWeight: 300, marginTop: '4px' }}>Category II — Strong</div>
-         <div style={{ fontSize: '12px', marginTop: '4px', color: '#fca5a5' }}>+2.4°C to +3.1°C deviation</div>
-         <div style={{ width: '100%', height: '40px', marginTop: '12px' }}>
-            <ResponsiveContainer width="100%" height="100%">
-               <AreaChart data={mhwData} margin={{top:0, bottom:0, left:0, right:0}}>
-                  <Area type="monotone" dataKey="anomaly" stroke="#ef4444" fill="rgba(239,68,68,0.3)" />
-               </AreaChart>
-            </ResponsiveContainer>
-         </div>
+         <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#f87171', textTransform: 'uppercase' }}>Marine Heatwave Live Status</div>
+         <div style={{ fontSize: '12px', fontWeight: 300, marginTop: '8px', color: 'rgba(255,255,255,0.6)' }}>Climatology unavailable for this region.</div>
       </div>
 
       {/* Darwin Widgets */}
@@ -370,24 +477,18 @@ export function RightDock({ mode, activeRegion, localDiscoveryData }: any) {
          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flex: 1 }}>
            <div style={{ background: 'rgba(217, 70, 239, 0.1)', borderRadius: '4px', border: '1px solid rgba(217, 70, 239, 0.3)', padding: '12px' }}>
                <div style={{ fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', color: '#d946ef' }}>Observation Gap Radar</div>
-               <div style={{ fontSize: '12px', marginTop: '8px', color: 'rgba(217, 70, 239, 0.7)' }}>
-                  Recommended Float Deployment:<br/><br/>
-                  <strong style={{ color: 'white' }}>📍 {(localDiscoveryData.radarBase[0].position[1]).toFixed(1)}°N, {(localDiscoveryData.radarBase[0].position[0]).toFixed(1)}°E</strong><br/>
-                  (Source: {localDiscoveryData.sourceRegion.name})
+               <div style={{ fontSize: '11px', marginTop: '8px', color: 'rgba(255,255,255,0.6)' }}>
+                  Live analysis unavailable.<br/><br/>
+                  Insufficient real-data baseline for accurate spatial deployment interpolation.
                </div>
            </div>
            
            <div style={{ background: 'rgba(217, 70, 239, 0.1)', borderRadius: '4px', border: '1px solid rgba(217, 70, 239, 0.3)', padding: '12px', flex: 1 }}>
               <div style={{ fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', color: '#d946ef' }}>Ocean Phenomenon Family Tree</div>
-              <ul style={{ fontSize: '12px', margin: 0, paddingLeft: '16px', color: 'rgba(255,255,255,0.8)', marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                 <li>Subsurface Events
-                    <ul style={{ paddingLeft: '16px', marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <li>Thermal Inversion</li>
-                      <li style={{ color: '#d946ef', fontWeight: 'bold' }}>↳ Pattern Ω-17 (Active Focus)</li>
-                    </ul>
-                 </li>
-                 <li>Salinity Anomalies</li>
-              </ul>
+              <div style={{ fontSize: '11px', marginTop: '8px', color: 'rgba(255,255,255,0.6)' }}>
+                  Live classification unavailable.<br/><br/>
+                  No real-time phenomenon classification data detected in the current geometry.
+              </div>
            </div>
          </div>
       )}
@@ -395,7 +496,7 @@ export function RightDock({ mode, activeRegion, localDiscoveryData }: any) {
   );
 }
 
-export function BottomDock({ time, setTime, isPlaying, setIsPlaying, setPlaybackSpeed }: any) {
+export function BottomDock({ time, setTime, isPlaying, setIsPlaying, setPlaybackSpeed, minTime, maxTime }: any) {
   return (
     <div className="glass-panel" style={{ position: 'absolute', bottom: '24px', left: '50%', transform: 'translateX(-50%)', width: '640px', padding: '12px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', pointerEvents: 'auto', zIndex: 10 }}>
       
@@ -410,15 +511,17 @@ export function BottomDock({ time, setTime, isPlaying, setIsPlaying, setPlayback
       
       {/* Scrubber */}
       <div style={{ display: 'flex', flex: 1, padding: '0 24px', gap: '12px', alignItems: 'center' }}>
-         <span style={{ fontSize: '10px', fontFamily: 'monospace', color: 'rgba(255,255,255,0.5)' }}>{(time).toFixed(0)}</span>
+         <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#f59e0b', width: '130px' }}>HISTORICAL PLAYBACK</span>
          <input 
            type="range" 
-           min="0" max="1000" 
+           min={minTime} max={maxTime} step="3600000"
            value={time}
            onChange={(e) => setTime(Number(e.target.value))}
            style={{ flex: 1, accentColor: '#06b6d4', height: '4px', background: 'rgba(255,255,255,0.2)', borderRadius: '2px', cursor: 'pointer' }}
          />
-         <span style={{ fontSize: '10px', fontFamily: 'monospace', color: 'rgba(255,255,255,0.5)' }}>1000</span>
+         <span style={{ fontSize: '11px', fontFamily: 'monospace', color: 'rgba(255,255,255,0.7)', width: '130px', textAlign: 'right' }}>
+            {new Date(time).toISOString().replace('T', ' ').slice(0, 19)} UTC
+         </span>
       </div>
 
       {/* Speed Controls */}
@@ -460,6 +563,31 @@ export function DepthSlicer({ depthFilter, setDepthFilter }: any) {
       <div style={{ marginTop: '16px', fontSize: '10px', fontFamily: 'monospace', color: '#06b6d4', fontWeight: 'bold' }}>
          {depthFilter}m
       </div>
+    </div>
+  );
+}
+
+export function MapLegend() {
+  return (
+    <div className="glass-panel" style={{ position: 'absolute', bottom: '110px', left: '16px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px', pointerEvents: 'auto', zIndex: 10 }}>
+        <div style={{ fontSize: '10px', fontWeight: 'bold', color: 'white', textTransform: 'uppercase', marginBottom: '4px' }}>Map Key</div>
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'rgba(255,255,255,0.8)' }}>
+            <div style={{ width: '16px', height: '2px', background: 'rgba(16, 185, 129, 0.8)' }}></div>
+            OCEAN CURRENT
+            <span style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', marginLeft: '4px' }}>(Open-Meteo)</span>
+        </div>
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'rgba(255,255,255,0.8)' }}>
+            <div style={{ width: '16px', height: '4px', background: 'rgba(245, 158, 11, 0.8)', borderRadius: '2px' }}></div>
+            FLOAT TRAJECTORY
+            <span style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', marginLeft: '4px' }}>(Argovis)</span>
+        </div>
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'rgba(255,255,255,0.8)' }}>
+            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'rgba(6, 182, 212, 0.6)' }}></div>
+            OBSERVATION
+        </div>
     </div>
   );
 }

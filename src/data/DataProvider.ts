@@ -6,8 +6,7 @@ export interface IFloatDataProvider {
      * Future Argovis integration will hit spatial bounding box endpoints to assemble these organically.
      */
     getRegions(): Promise<Record<string, RegionTheme>>;
-    
-    // Future Methods (Stubbed Architecture):
-    // getObservations(polygonGeoJSON: any): Promise<ArgoObservation[]>;
-    // getTrajectory(floatId: string): Promise<any>;
+    getRegion(regionId: string): Promise<RegionTheme>;
+    fetchSpatialPolygon(polygonGeoJSON: string, regionName: string): Promise<RegionTheme>;
+    fetchViewportData(bounds: [number, number, number, number], regionName: string): Promise<RegionTheme>;
 }

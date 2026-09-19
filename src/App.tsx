@@ -4,7 +4,7 @@ import { _GlobeView as GlobeView, LightingEffect, AmbientLight, DirectionalLight
 import { CONSTANTS } from './mockData';
 import { DataService } from './data';
 import { renderMapLayers } from './components/MapLayers';
-import { TopNav, LeftDock, RightDock, BottomDock, DepthSlicer } from './components/CommandDocks';
+import { TopNav, LeftDock, RightDock, BottomDock, DepthSlicer, MapLegend } from './components/CommandDocks';
 
 // Provide lighting effect to resolve luma.gl v9 uniform block reflection crashes in GlobeView
 const ambientLight = new AmbientLight({ color: [255, 255, 255], intensity: 1.0 });
@@ -66,10 +66,8 @@ export function segmentIntersectsPolygon(p1: number[], p2: number[], polygon: nu
 function App() {
   const [regionsData, setRegionsData] = useState<any>(null);
   const [viewState, setViewState] = useState(INITIAL_VIEW_STATE);
-  
-  useEffect(() => {
-    DataService.getRegions().then(data => setRegionsData(data));
-  }, []);
+  const [viewportRegion, setViewportRegion] = useState<any>(null);
+  const [viewportStatus, setViewportStatus] = useState('LOADING'); // LOADING, READY, EMPTY, ERROR
 
   // App Shared State
   const [mode, setMode] = useState('EXECUTIVE'); // AGGREGATION, EXECUTIVE, DARWIN, DRAW
@@ -79,9 +77,57 @@ function App() {
   const [drawPoints, setDrawPoints] = useState<any[]>([]);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [localDiscoveryData, setLocalDiscoveryData] = useState<any>(null);
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   
   const [activeRegionId, setActiveRegionId] = useState('kuroshio');
-  const activeRegion = regionsData ? regionsData[activeRegionId] : null;
+
+  useEffect(() => {
+    DataService.getRegions().then(data => setRegionsData(data));
+  }, []);
+
+  // Use Refs preventing race conditions across async boundaries natively
+  const fetchCounter = useRef(0);
+  const lastFetchedView = useRef({ longitude: -999, latitude: -999, zoom: -999 });
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+        // Debounce threshold: Ignore micro-pans to prevent flashing the Sync state
+        const dLon = Math.abs(viewState.longitude - lastFetchedView.current.longitude);
+        const dLat = Math.abs(viewState.latitude - lastFetchedView.current.latitude);
+        const dZoom = Math.abs(viewState.zoom - lastFetchedView.current.zoom);
+        if (dLon < 2 && dLat < 2 && dZoom < 0.5) return;
+
+        setViewportStatus('LOADING');
+        const span = Math.min(30, 360 / Math.pow(2, Math.max(0, viewState.zoom - 1.2)));
+        const hw = span / 2;
+        let w = viewState.longitude - hw;
+        let e = viewState.longitude + hw;
+        let s = Math.max(-90, viewState.latitude - hw);
+        let n = Math.min(90, viewState.latitude + hw);
+
+        lastFetchedView.current = { longitude: viewState.longitude, latitude: viewState.latitude, zoom: viewState.zoom };
+
+        fetchCounter.current += 1;
+        const currentFetchId = fetchCounter.current;
+
+        DataService.fetchViewportData([w, s, e, n], 'Current Viewport').then(res => {
+            if (fetchCounter.current !== currentFetchId) return; // Ignore stale async resolutions safely
+            if (!res.tsData || res.tsData.length === 0) {
+                setViewportStatus('EMPTY');
+            } else {
+                setViewportStatus('READY');
+            }
+            setViewportRegion(res);
+        }).catch(() => {
+            if (fetchCounter.current === currentFetchId) setViewportStatus('ERROR');
+        });
+
+    }, 800);
+    
+    return () => clearTimeout(handler);
+  }, [viewState.longitude, viewState.latitude, viewState.zoom]);
+
+ 
 
   const [darwinResult, setDarwinResult] = useState<any>(null);
   const [isDarwinProcessing, setIsDarwinProcessing] = useState(false);
@@ -105,7 +151,7 @@ function App() {
 
     await new Promise(r => setTimeout(r, 600)); // UI pacing simulation
 
-    const regionData = regionsData[targetRegionId];
+    const regionData = viewportRegion;
     if (!regionData || !regionData.tsData || regionData.tsData.length === 0) {
         setDarwinResult({ type: 'NO_DATA', query });
         setIsDarwinProcessing(false);
@@ -153,26 +199,40 @@ function App() {
   const lastUpdateRef = useRef(Date.now());
 
   useEffect(() => {
-    if (!activeRegion) return;
+    if (!regionsData || !regionsData[activeRegionId]) return;
+    const base = regionsData[activeRegionId];
     setMode('EXECUTIVE');
     setDrawPoints([]);
     setLocalDiscoveryData(null);
+    setDarwinResult(null);
     setViewState(vs => ({
       ...vs,
-      longitude: activeRegion.center.longitude,
-      latitude: activeRegion.center.latitude,
-      zoom: activeRegion.center.zoom,
-      transitionDuration: 3000,
+      longitude: base.center.longitude,
+      latitude: base.center.latitude,
+      zoom: base.center.zoom,
+      transitionDuration: 2000,
       transitionInterpolator: new FlyToInterpolator()
     }));
-  }, [activeRegionId, activeRegion]);
+    setSelectedProfileId(null);
+  }, [activeRegionId, regionsData]);
 
   useEffect(() => {
     const animate = () => {
       if (isPlaying) {
         const now = Date.now();
-        const delta = (now - lastUpdateRef.current) * playbackSpeed * 0.02;
-        setCurrentTime(t => (t + delta) % CONSTANTS.END_TIME);
+        const minT = viewportRegion?.trajectories?.length > 0 ? Math.min(...viewportRegion.trajectories.map((t:any) => t.path.length > 0 ? t.path[0][3] : 0)) : CONSTANTS.START_TIME;
+        const maxT = viewportRegion?.trajectories?.length > 0 ? Math.max(...viewportRegion.trajectories.map((t:any) => t.path.length > 0 ? t.path[t.path.length-1][3] : 1000)) : CONSTANTS.END_TIME;
+        const span = maxT - minT;
+        // Move at exactly `playbackSpeed` percentage per frame scaling logically across unix time
+        const step = (span > 0 ? span : 1000) * 0.001 * playbackSpeed;
+        setCurrentTime(t => {
+            if (t < minT || t > maxT + step * 2) {
+                return minT;
+            }
+            let nt = t + step;
+            if (nt > maxT) nt = minT;
+            return nt;
+        });
         lastUpdateRef.current = now;
       }
       animationRef.current = requestAnimationFrame(animate);
@@ -186,28 +246,23 @@ function App() {
     return () => {
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
     };
-  }, [isPlaying, playbackSpeed]);
+  }, [isPlaying, playbackSpeed, viewportRegion?.trajectories?.length]);
 
-  if (!regionsData || !activeRegion) {
+  if (!viewportRegion) {
     return (
       <div style={{ background: '#040711', width: '100vw', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#06b6d4', fontFamily: 'monospace' }}>
-        INITIALIZING OCEANOGRAPHIC DATA LAYER...
+        LOADING INITIAL SPATIAL VIEWPORT DATA...
       </div>
     );
   }
 
-  const allRegionsList = Object.values(regionsData) as any[];
-  
-  const globalTrajectories = allRegionsList.flatMap((r: any) => 
-    r.trajectories.map((traj: any) => ({ ...traj, regionId: r.id }))
-  );
-  const globalDivePaths = allRegionsList.flatMap((r: any) => 
-    r.divePaths.map((path: any) => ({ ...path, regionId: r.id }))
-  );
-  const globalAnomalies = allRegionsList.flatMap((r: any) => 
-    r.anomaly.map((a: any) => ({ ...a, regionId: r.id }))
-  );
-  const globalBounds = allRegionsList.map((r: any) => ({ bounds: r.bounds, regionId: r.id }));
+  const activeRegion = viewportRegion;
+  const globalTrajectories = viewportRegion.trajectories.map((traj: any) => ({ ...traj, regionId: viewportRegion.id }));
+  const globalDivePaths = viewportRegion.divePaths.map((path: any) => ({ ...path, regionId: viewportRegion.id }));
+  const globalAnomalies = viewportRegion.anomaly.map((a: any) => ({ ...a, regionId: viewportRegion.id }));
+  const globalCurrents = viewportRegion.currentVectors ? viewportRegion.currentVectors.map((v: any) => ({ ...v, regionId: viewportRegion.id })) : [];
+  // Display borders for ALL initialized regions purely as presets securely without needing telemetry
+  const globalBounds = regionsData ? Object.values(regionsData).map((r: any) => ({ bounds: r.bounds, regionId: r.id })) : [];
 
   const layers = renderMapLayers({ 
     currentTime, 
@@ -219,7 +274,10 @@ function App() {
     globalTrajectories,
     globalDivePaths,
     globalAnomalies,
-    globalBounds
+    globalBounds,
+    globalCurrents,
+    selectedProfileId,
+    setSelectedProfileId
   });
 
   return (
@@ -253,77 +311,45 @@ function App() {
               return;
             }
             
-            // Execute genuine localized query against global trajectory loops preserving geometric crossings
-            const localSubsetTrajectories = globalTrajectories.map((traj: any) => {
-               const pointsInsidePoly = [];
-               for(let i=0; i<traj.path.length; i++) {
-                  const p1 = traj.path[i];
-                  const inside = pointInPolygon([p1[0], p1[1]], drawPoints);
-                  if (inside) {
-                     pointsInsidePoly.push(p1);
-                     continue;
-                  }
-                  if (i > 0) {
-                     const p0 = traj.path[i-1];
-                     if(segmentIntersectsPolygon([p0[0], p0[1]], [p1[0], p1[1]], drawPoints)) {
-                        pointsInsidePoly.push(p1);
-                     }
-                  }
-               }
-               if (pointsInsidePoly.length === 0) {
-                  for(let i=1; i<traj.path.length; i++) {
-                      const p0 = traj.path[i-1];
-                      const p1 = traj.path[i];
-                      if(segmentIntersectsPolygon([p0[0], p0[1]], [p1[0], p1[1]], drawPoints)) {
-                          pointsInsidePoly.push(p0, p1);
-                      }
-                  }
-               }
-               return { ...traj, localPath: pointsInsidePoly };
-            }).filter((traj: any) => traj.localPath.length > 0);
+            // Execute genuine localized spatial query against Argovis bypassing generic datasets inherently isolating coordinates
+            setViewportStatus('LOADING');
+            const closedPoly = [...drawPoints, drawPoints[0]];
+            const polyString = JSON.stringify(closedPoly.map(p => [Math.round(p[0]*100)/100, Math.round(p[1]*100)/100]));
             
-            if (localSubsetTrajectories.length === 0) {
-               setMode('EMPTY_DISCOVERY');
-               setLocalDiscoveryData(null);
-               setDrawPoints([]);
-            } else {
-               // Mathematically extract the parent domain using hit rates
-               const hitCounts = localSubsetTrajectories.reduce((acc: any, traj: any) => {
-                  acc[traj.regionId] = (acc[traj.regionId] || 0) + 1;
-                  return acc;
-               }, {});
-               const dominantRegionId = Object.keys(hitCounts).reduce((a, b) => hitCounts[a] > hitCounts[b] ? a : b);
-               const hitRegion = regionsData[dominantRegionId];
-               
-               const localAnomalyPoints = hitRegion.anomaly.filter((a: any) => 
-                 pointInPolygon([a.position[0], a.position[1]], drawPoints)
-               );
-               const hasAnomaly = localAnomalyPoints.length > 5;
-               
-               const cLon = drawPoints.reduce((acc, p) => acc + p[0], 0) / drawPoints.length;
-               const cLat = drawPoints.reduce((acc, p) => acc + p[1], 0) / drawPoints.length;
-               
-               const localRadar = [{ position: [cLon, cLat, 0] }];
-               
-               const totalLocalObservations = localSubsetTrajectories.reduce((acc: number, traj: any) => acc + traj.localPath.length, 0);
-               const totalRegionObservations = hitRegion.trajectories.reduce((acc: number, traj: any) => acc + traj.path.length, 0);
-               
-               const ratio = totalLocalObservations / totalRegionObservations;
-               const tsCount = Math.max(5, Math.floor(hitRegion.tsData.length * ratio));
-               
-               setLocalDiscoveryData({
-                 sourceRegion: hitRegion,
-                 count: localSubsetTrajectories.length,
-                 observationCount: totalLocalObservations,
-                 anomaly: localAnomalyPoints,
-                 hasAnomaly: hasAnomaly,
-                 radarBase: localRadar,
-                 centroid: [cLon, cLat],
-                 tsData: hitRegion.tsData.slice(0, tsCount)
-               });
-               setMode('DARWIN');
-               setDrawPoints([]);
-            }
+            DataService.fetchSpatialPolygon(polyString, 'Drawn Selection').then((hitRegion: any) => {
+                setViewportStatus('READY');
+                if (!hitRegion.tsData || hitRegion.tsData.length === 0) {
+                   setMode('EMPTY_DISCOVERY');
+                   setLocalDiscoveryData(null);
+                   setDrawPoints([]);
+                } else {
+                   const cLon = closedPoly.reduce((acc, p) => acc + p[0], 0) / closedPoly.length;
+                   const cLat = closedPoly.reduce((acc, p) => acc + p[1], 0) / closedPoly.length;
+                   const lons = closedPoly.map(p => p[0]);
+                   const lats = closedPoly.map(p => p[1]);
+                   const polyBounds = [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]];
+
+                   setLocalDiscoveryData({
+                     sourceRegion: hitRegion,
+                     count: hitRegion.trajectories.length,
+                     observationCount: hitRegion.tsData.length,
+                     anomaly: hitRegion.anomaly,
+                     hasAnomaly: hitRegion.anomaly.length > 5,
+                     radarBase: [{ position: [cLon, cLat, 0] }],
+                     centroid: [cLon, cLat],
+                     tsData: hitRegion.tsData,
+                     trajectories: hitRegion.trajectories,
+                     bounds: polyBounds
+                   });
+                   setMode('DARWIN');
+                   setDrawPoints([]);
+                }
+            }).catch(() => {
+                setViewportStatus('ERROR');
+                setMode('EMPTY_DISCOVERY');
+                setDrawPoints([]);
+            });
+            
           }
         }}
       >
@@ -337,15 +363,27 @@ function App() {
           pointerEvents: 'none'
         }}
       >
+        {viewportStatus === 'LOADING' && (
+          <div style={{ position: 'absolute', top: '24px', left: '50%', transform: 'translateX(-50%)', background: 'rgba(4, 7, 17, 0.7)', backdropFilter: 'blur(10px)', border: '1px solid rgba(6, 182, 212, 0.5)', padding: '6px 16px', borderRadius: '16px', zIndex: 1000, color: '#22d3ee', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 20px rgba(0,0,0,0.5)', fontWeight: 600, fontSize: '12px', letterSpacing: '1px' }}>
+             ◉ SYNCING ARGOVIS DATA...
+          </div>
+        )}
+        
+        {viewportStatus === 'EMPTY' && (
+          <div style={{ position: 'absolute', top: '24px', left: '50%', transform: 'translateX(-50%)', background: 'rgba(127, 29, 29, 0.7)', backdropFilter: 'blur(10px)', border: '1px solid rgba(239, 68, 68, 0.5)', padding: '6px 16px', borderRadius: '16px', zIndex: 1000, color: '#fca5a5', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 20px rgba(0,0,0,0.5)', fontWeight: 600, fontSize: '12px', letterSpacing: '1px' }}>
+             ⚠ NO LIVE OBSERVATIONS IN VIEWPORT
+          </div>
+        )}
         {/* Top Navigation */}
         <TopNav mode={mode} setMode={setMode} activeRegionId={activeRegionId} setActiveRegionId={setActiveRegionId} executeDarwinQuery={executeDarwinQuery} />
 
         {/* Left HUD Docks */}
         <DepthSlicer depthFilter={depthFilter} setDepthFilter={setDepthFilter} />
-        <LeftDock mode={mode} activeRegion={activeRegion} localDiscoveryData={localDiscoveryData} darwinResult={darwinResult} isDarwinProcessing={isDarwinProcessing} />
+        <LeftDock mode={mode} setMode={setMode} setDrawPoints={setDrawPoints} activeRegion={activeRegion} localDiscoveryData={localDiscoveryData} darwinResult={darwinResult} isDarwinProcessing={isDarwinProcessing} />
+        <MapLegend />
 
         {/* Right Telemetry Dock */}
-        <RightDock mode={mode} activeRegion={activeRegion} localDiscoveryData={localDiscoveryData} />
+        <RightDock mode={mode} activeRegion={activeRegion} localDiscoveryData={localDiscoveryData} selectedProfileId={selectedProfileId} setSelectedProfileId={setSelectedProfileId} />
 
         {mode === 'EMPTY_DISCOVERY' && (
            <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', background: 'rgba(127, 29, 29, 0.8)', padding: '24px', borderRadius: '8px', border: '1px solid #ef4444', zIndex: 100, textAlign: 'center', pointerEvents: 'auto', backdropFilter: 'blur(10px)', boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }}>
@@ -366,6 +404,8 @@ function App() {
           isPlaying={isPlaying} 
           setIsPlaying={setIsPlaying}
           setPlaybackSpeed={setPlaybackSpeed}
+          minTime={globalTrajectories.length > 0 ? Math.min(...globalTrajectories.map((t:any) => t.path.length > 0 ? t.path[0][3] : 0)) : CONSTANTS.START_TIME}
+          maxTime={globalTrajectories.length > 0 ? Math.max(...globalTrajectories.map((t:any) => t.path.length > 0 ? t.path[t.path.length-1][3] : 1000)) : CONSTANTS.END_TIME}
         />
       </div>
     </div>

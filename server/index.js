@@ -14,7 +14,7 @@ app.use(express.json());
 // Proxy endpoint for Argovis API
 app.get('/api/argovis/argo', async (req, res) => {
     try {
-        const { polygon, startDate, endDate } = req.query;
+        const { polygon, startDate, endDate, data } = req.query;
         if (!polygon) {
             return res.status(400).json({ error: 'Missing polygon parameter' });
         }
@@ -22,6 +22,7 @@ app.get('/api/argovis/argo', async (req, res) => {
         let url = `https://argovis-api.colorado.edu/argo?polygon=${encodeURIComponent(polygon)}`;
         if (startDate) url += `&startDate=${encodeURIComponent(startDate)}`;
         if (endDate) url += `&endDate=${encodeURIComponent(endDate)}`;
+        if (data) url += `&data=${encodeURIComponent(data)}`;
 
         const headers = {};
         if (process.env.ARGOVIS_API_KEY) {
@@ -36,8 +37,8 @@ app.get('/api/argovis/argo', async (req, res) => {
             return res.status(response.status).json({ error: `Argovis API returned ${response.status}`, details: errBody });
         }
         
-        const data = await response.json();
-        res.json(data);
+        const responseData = await response.json();
+        res.json(responseData);
     } catch (error) {
         console.error("Backend Proxy Error:", error);
         res.status(500).json({ error: 'Internal Server Error interfacing with Argovis API' });
